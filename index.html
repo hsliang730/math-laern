@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title id="site-browser-title">我的網站 - 會員系統</title>
+    <meta name="description" content="具備深淺主題、靈動角色互動、Windows 11風格階層講義、成績管理、發問聊天與管理員控制台的雲端會員整合系統" />
+    <meta property="og:title" content="我的網站 - 會員系統" />
+    <meta property="og:description" content="具備深淺主題、靈動角色互動、Windows 11風格階層講義、成績管理、發問聊天與管理員控制台的雲端會員整合系統" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- PDF.js for multi-page PDF continuous scroll preview -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    </script>
+  </head>
+  <body class="bg-gray-50 dark:bg-gray-950 text-gray-800 dark:text-gray-100 min-h-screen transition-colors duration-200">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

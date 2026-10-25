@@ -1,0 +1,8 @@
+{
+  "name": "數學學員雲端會員系統",
+  "description": "具備深淺主題、靈動角色互動、Windows 11風格階層講義、成績管理、發問聊天與管理員控制台的雲端會員整合系統",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

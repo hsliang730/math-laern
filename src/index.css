@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* === Windows 11 Fluent UI 資料夾與檔案卡片特效 === */
+.win11-folder-card, .win11-file-card {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    transition: all 0.18s cubic-bezier(0, 0, 0, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+.dark .win11-folder-card, .dark .win11-file-card {
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.win11-folder-card:hover, .win11-file-card:hover {
+    background: rgba(238, 246, 255, 0.95);
+    border-color: rgba(0, 103, 192, 0.45);
+    box-shadow: 0 4px 12px rgba(0, 103, 192, 0.15);
+    transform: translateY(-1px);
+}
+.dark .win11-folder-card:hover, .dark .win11-file-card:hover {
+    background: rgba(30, 58, 138, 0.35);
+    border-color: rgba(96, 165, 250, 0.45);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    transform: translateY(-1px);
+}
+
+/* 現代化細滾輪樣式 */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #4b5563;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* 跑馬燈動畫樣式 */
+@keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+}
+.animate-marquee {
+    display: inline-block;
+    white-space: nowrap;
+    animation: marquee 25s linear infinite;
+}
+.animate-marquee:hover {
+    animation-play-state: paused;
+}
+
+/* 刷新按鈕旋轉動畫 */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.refreshing {
+    animation: spin 0.8s linear infinite;
+}
+
+/* === 幾何圖形角色動態背景特效 (左側區域專用) === */
+.geometric-hero-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.geo-shape {
+    position: absolute;
+    opacity: 0.25;
+    transition: transform 0.3s ease;
+}
+.dark .geo-shape {
+    opacity: 0.35;
+}
+@keyframes floatSlow {
+    0%, 100% { transform: translateY(0px) rotate(0deg) scale(1); }
+    50% { transform: translateY(-25px) rotate(180deg) scale(1.08); }
+}
+@keyframes floatFast {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50% { transform: translateY(30px) rotate(-180deg); }
+}
+@keyframes pulseGlow {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.2); opacity: 0.5; }
+}
+.shape-circle {
+    width: 130px; height: 130px; border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    top: 15%; left: 15%;
+    animation: floatSlow 8s ease-in-out infinite;
+}
+.shape-square {
+    width: 110px; height: 110px; border-radius: 24px;
+    background: linear-gradient(135deg, #10b981, #3b82f6);
+    bottom: 15%; right: 15%;
+    animation: floatFast 10s ease-in-out infinite;
+}
+.shape-triangle {
+    width: 0; height: 0;
+    border-left: 70px solid transparent;
+    border-right: 70px solid transparent;
+    border-bottom: 120px solid #f59e0b;
+    top: 25%; right: 18%;
+    animation: pulseGlow 6s ease-in-out infinite;
+}
+.shape-ring {
+    width: 100px; height: 100px; border: 14px solid #ec4899; border-radius: 50%;
+    bottom: 20%; left: 18%;
+    animation: floatSlow 9s ease-in-out infinite reverse;
+}
+
+/* === 互動眼睛與成功/失敗動畫特效 === */
+.eye-container {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 1.25rem;
+    transition: all 0.3s ease;
+}
+.eye {
+    width: 20px;
+    height: 20px;
+    background-color: #1f2937;
+    border-radius: 50%;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.dark .eye {
+    background-color: #f3f4f6;
+}
+.pupil {
+    width: 10px;
+    height: 10px;
+    background-color: #ffffff;
+    border-radius: 50%;
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    transition: transform 0.1s ease-out;
+}
+.dark .pupil {
+    background-color: #111827;
+}
+/* 害羞閉眼狀態：變為水平線條 */
+.shy-eyes .eye {
+    height: 4px;
+    border-radius: 2px;
+    transform: scaleY(0.5);
+}
+.shy-eyes .pupil {
+    opacity: 0;
+}
+
+/* 成功喜悅彈跳與綠色外框動畫 */
+@keyframes successBounce {
+    0% { transform: scale(1) translateY(0); }
+    30% { transform: scale(1.03) translateY(-6px); }
+    50% { transform: scale(0.99) translateY(0); }
+    70% { transform: scale(1.01) translateY(-2px); }
+    100% { transform: scale(1) translateY(0); }
+}
+.success-animate {
+    animation: successBounce 0.6s ease;
+    border-color: #10b981 !important;
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.4) !important;
+}
+
+/* 失敗震動與紅色外框動畫 */
+@keyframes shakeError {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-8px); }
+    40%, 80% { transform: translateX(8px); }
+}
+.error-animate {
+    animation: shakeError 0.4s ease;
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 25px rgba(239, 68, 68, 0.4) !important;
+}
