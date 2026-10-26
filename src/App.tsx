@@ -358,26 +358,56 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
-  // Poll stream messages when viewing an active stream
+  // Real-time stream messages when viewing an active stream
   useEffect(() => {
     if (activeStream?.id) {
       loadStreamMessages(activeStream.id);
-      const interval = setInterval(() => {
-        loadStreamMessages(activeStream.id);
-      }, 3000);
-      return () => clearInterval(interval);
+      const unsubscribe = api.subscribeLiveStreamMessages(activeStream.id, (msgs) => {
+        setStreamMessages(msgs);
+        setTimeout(() => {
+          if (streamChatBoxRef.current) {
+            streamChatBoxRef.current.scrollTop = streamChatBoxRef.current.scrollHeight;
+          }
+        }, 50);
+      });
+      return () => unsubscribe();
     }
   }, [activeStream?.id]);
 
-  // Periodic poll for admin user list (every 15s) when admin is active
+  // Real-time bidirectional sync across Gemini Studio and Netlify
   useEffect(() => {
-    if (isAdmin && (currentView === 'admin-dash' || activeTab === 'settings' || activeTab === 'faq')) {
-      const interval = setInterval(() => {
-        loadAdminUsers();
-      }, 15000);
-      return () => clearInterval(interval);
-    }
-  }, [isAdmin, currentView, activeTab]);
+    const unsubStreams = api.subscribeLiveStreams((list) => {
+      setStreams(list);
+      if (activeStream) {
+        const refreshed = list.find((s) => s.id === activeStream.id);
+        if (refreshed) setActiveStream(refreshed);
+      }
+    });
+
+    const unsubUsers = api.subscribeAdminUsers((list) => {
+      setAdminUsers(list);
+    });
+
+    const unsubAnn = api.subscribeAnnouncements((list) => {
+      setAnnouncements(list);
+    });
+
+    const unsubFaq = api.subscribeFaqMessages((list) => {
+      setAllFaqMessages(list);
+    });
+
+    const unsubConfig = api.subscribeSiteConfig((cfg) => {
+      setSiteConfig((prev) => ({ ...prev, ...cfg }));
+    });
+
+    return () => {
+      unsubStreams();
+      unsubUsers();
+      unsubAnn();
+      unsubFaq();
+      unsubConfig();
+    };
+  }, [activeStream?.id]);
 
   async function loadSiteConfig() {
     try {
@@ -1125,7 +1155,7 @@ export default function App() {
           showToast('直播已順利結束！感謝開播。', 'info');
           await loadStreams();
           if (activeStream?.id === streamId) {
-            setActiveStream(res.stream);
+            setActiveStream(res.stream || null);
           }
         } catch (err: any) {
           showToast('結束直播失敗：' + err.message, 'error');

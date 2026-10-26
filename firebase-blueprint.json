@@ -1,0 +1,201 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account for authentication and role management",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "nickname": { "type": "string" },
+        "isAdmin": { "type": "boolean" },
+        "isTutor": { "type": "boolean" },
+        "tutorSubjects": { "type": "array" },
+        "must_change_password": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
+        "isOnline": { "type": "boolean" },
+        "last_seen": { "type": "string" },
+        "last_login": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["username", "nickname", "isAdmin"]
+    },
+    "SiteConfig": {
+      "title": "SiteConfig",
+      "description": "Global website configuration settings and countdown details",
+      "type": "object",
+      "properties": {
+        "site_title": { "type": "string" },
+        "login_title": { "type": "string" },
+        "login_desc": { "type": "string" },
+        "welcome_hero_title": { "type": "string" },
+        "version_tag": { "type": "string" },
+        "status_tag": { "type": "string" },
+        "marquee_text": { "type": "string" },
+        "line_id": { "type": "string" },
+        "line_url": { "type": "string" },
+        "line_desc": { "type": "string" },
+        "help_text": { "type": "string" },
+        "version_intro_text": { "type": "string" },
+        "maintenance_mode": { "type": "boolean" },
+        "maintenance_message": { "type": "string" },
+        "countdown_enabled": { "type": "boolean" },
+        "countdown_title": { "type": "string" },
+        "countdown_target_date": { "type": "string" },
+        "countdown_slogan": { "type": "string" },
+        "footer_text": { "type": "string" }
+      }
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Platform announcement item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "content": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["content", "created_by", "created_at"]
+    },
+    "Handout": {
+      "title": "Handout",
+      "description": "Handout folder or document item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "url": { "type": "string" },
+        "is_folder": { "type": "boolean" },
+        "parent_id": { "type": "string" },
+        "created_by": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["title", "subject", "is_folder", "created_at"]
+    },
+    "ForumMessage": {
+      "title": "ForumMessage",
+      "description": "Discussion message on student board",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "subject": { "type": "string" },
+        "content": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["username", "content", "created_at"]
+    },
+    "Grade": {
+      "title": "Grade",
+      "description": "Student mock exam score entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "subject": { "type": "string" },
+        "range_text": { "type": "string" },
+        "score": { "type": "number" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["username", "subject", "score", "created_at"]
+    },
+    "FaqMessage": {
+      "title": "FaqMessage",
+      "description": "Tutoring and consultation Q&A message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "sender": { "type": "string" },
+        "subject": { "type": "string" },
+        "sender_role": { "type": "string" },
+        "tutor_subject": { "type": "string" },
+        "content": { "type": "string" },
+        "is_admin_reply": { "type": "boolean" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["username", "sender", "content", "created_at"]
+    },
+    "LiveStream": {
+      "title": "LiveStream",
+      "description": "Live classroom broadcasting session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "streamType": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "streamUrl": { "type": "string" },
+        "isLive": { "type": "boolean" },
+        "broadcaster": { "type": "string" },
+        "broadcasterNickname": { "type": "string" },
+        "broadcasterRole": { "type": "string" },
+        "tutorSubject": { "type": "string" },
+        "viewers": { "type": "number" },
+        "likes": { "type": "number" },
+        "startedAt": { "type": "string" },
+        "endedAt": { "type": "string" },
+        "allowChat": { "type": "boolean" },
+        "whiteboardEnabled": { "type": "boolean" }
+      },
+      "required": ["title", "subject", "isLive", "broadcaster", "startedAt"]
+    },
+    "LiveStreamMessage": {
+      "title": "LiveStreamMessage",
+      "description": "Real-time chat and question message in a live classroom",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "streamId": { "type": "string" },
+        "username": { "type": "string" },
+        "nickname": { "type": "string" },
+        "role": { "type": "string" },
+        "content": { "type": "string" },
+        "isQuestion": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["streamId", "username", "nickname", "content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Registered user accounts"
+    },
+    "/site_config/{configId}": {
+      "schema": "SiteConfig",
+      "description": "Global website configuration"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "System announcements"
+    },
+    "/handouts/{handoutId}": {
+      "schema": "Handout",
+      "description": "Course materials and folders"
+    },
+    "/forum_messages/{messageId}": {
+      "schema": "ForumMessage",
+      "description": "Discussion forum posts"
+    },
+    "/grades/{gradeId}": {
+      "schema": "Grade",
+      "description": "Exam score reports"
+    },
+    "/faq_messages/{faqId}": {
+      "schema": "FaqMessage",
+      "description": "Subject tutor questions and answers"
+    },
+    "/streams/{streamId}": {
+      "schema": "LiveStream",
+      "description": "Active and archived live broadcast classes"
+    },
+    "/stream_messages/{messageId}": {
+      "schema": "LiveStreamMessage",
+      "description": "Live stream chat questions and comments"
+    }
+  }
+}
