@@ -9,6 +9,8 @@ import {
   ForumMessage,
   GradeItem,
   FaqMessage,
+  LiveStream,
+  LiveStreamMessage,
 } from './api.ts';
 
 declare global {
@@ -141,8 +143,38 @@ export default function App() {
   }>({ days: 0, hours: 0, minutes: 0, seconds: 0, isPassed: false });
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'home' | 'grades' | 'settings' | 'faq' | 'help' | 'version'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'live' | 'grades' | 'settings' | 'faq' | 'help' | 'version'>('home');
   const [sessionSeconds, setSessionSeconds] = useState<number>(0);
+
+  // Live Streaming state
+  const [streams, setStreams] = useState<LiveStream[]>([]);
+  const [activeStream, setActiveStream] = useState<LiveStream | null>(null);
+  const [streamMessages, setStreamMessages] = useState<LiveStreamMessage[]>([]);
+  const [streamChatInput, setStreamChatInput] = useState<string>('');
+  const [streamIsQuestion, setStreamIsQuestion] = useState<boolean>(false);
+  const [streamFilterSubject, setStreamFilterSubject] = useState<string>('全部');
+  const [createStreamModalOpen, setCreateStreamModalOpen] = useState<boolean>(false);
+  const [newStreamTitle, setNewStreamTitle] = useState<string>('');
+  const [newStreamSubject, setNewStreamSubject] = useState<string>('不分科');
+  const [newStreamType, setNewStreamType] = useState<'builtin' | 'youtube'>('builtin');
+  const [newStreamYoutubeUrl, setNewStreamYoutubeUrl] = useState<string>('');
+  const [newStreamCustomUrl, setNewStreamCustomUrl] = useState<string>('');
+  const [newStreamAllowChat, setNewStreamAllowChat] = useState<boolean>(true);
+  const [newStreamWhiteboard, setNewStreamWhiteboard] = useState<boolean>(true);
+
+  // Broadcaster Media Controls & Whiteboard
+  const [broadcasterMediaStream, setBroadcasterMediaStream] = useState<MediaStream | null>(null);
+  const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
+  const [isVideoOff, setIsVideoOff] = useState<boolean>(false);
+  const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
+  const [whiteboardActive, setWhiteboardActive] = useState<boolean>(false);
+  const [whiteboardColor, setWhiteboardColor] = useState<string>('#ef4444');
+  const [whiteboardBrushSize, setWhiteboardBrushSize] = useState<number>(3);
+  const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; emoji: string; x: number }>>([]);
+  const broadcasterVideoRef = useRef<HTMLVideoElement | null>(null);
+  const whiteboardCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawingRef = useRef<boolean>(false);
+  const streamChatBoxRef = useRef<HTMLDivElement | null>(null);
 
   // Subject filtering
   const [selectedSubject, setSelectedSubject] = useState<string>('全部');
@@ -297,6 +329,45 @@ export default function App() {
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
   }, [siteConfig.countdown_target_date]);
+
+  // Hash listener for independent room URL (#live-room-<id>)
+  useEffect(() => {
+    loadStreams();
+    const handleHash = async () => {
+      const hash = window.location.hash;
+      if (hash.startsWith('#live-room-')) {
+        const streamId = hash.replace('#live-room-', '');
+        try {
+          const list = await api.getStreams();
+          setStreams(list);
+          const found = list.find((s) => s.id === streamId);
+          if (found) {
+            setActiveStream(found);
+            setActiveTab('live');
+            if (currentView === 'auth') {
+              setCurrentView('user-panel');
+            }
+          }
+        } catch (e) {
+          console.warn('Hash live room error:', e);
+        }
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  // Poll stream messages when viewing an active stream
+  useEffect(() => {
+    if (activeStream?.id) {
+      loadStreamMessages(activeStream.id);
+      const interval = setInterval(() => {
+        loadStreamMessages(activeStream.id);
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeStream?.id]);
 
   // Periodic poll for admin user list (every 15s) when admin is active
   useEffect(() => {
@@ -793,12 +864,15 @@ export default function App() {
   }
 
   // Switch tab
-  function switchTab(tab: 'home' | 'grades' | 'settings' | 'faq' | 'help' | 'version') {
+  function switchTab(tab: 'home' | 'live' | 'grades' | 'settings' | 'faq' | 'help' | 'version') {
     setActiveTab(tab);
     if (tab === 'home') {
       loadAnnouncements();
       loadHandouts(currentFolderId, selectedSubject);
       loadForum(selectedSubject);
+      loadStreams();
+    } else if (tab === 'live') {
+      loadStreams();
     } else if (tab === 'grades') {
       loadGrades();
     } else if (tab === 'settings') {
@@ -807,6 +881,330 @@ export default function App() {
       loadFaqChat();
       if (isAdmin || isTutor) loadAdminUsers();
     }
+  }
+
+  // --- Live Stream Logic ---
+  async function loadStreams() {
+    try {
+      const list = await api.getStreams();
+      setStreams(list);
+      if (activeStream) {
+        const refreshed = list.find((s) => s.id === activeStream.id);
+        if (refreshed) setActiveStream(refreshed);
+      }
+    } catch (err) {
+      console.error('Failed to load streams:', err);
+    }
+  }
+
+  function extractYouTubeId(url: string): string {
+    if (!url) return '';
+    const trimmed = url.trim();
+    if (trimmed.length === 11 && !trimmed.includes('/') && !trimmed.includes('?')) return trimmed;
+    const match = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/))([\w-]{11})/);
+    return match ? match[1] : trimmed;
+  }
+
+  function getStreamStandaloneUrl(streamId: string): string {
+    const origin = window.location.origin;
+    const pathname = window.location.pathname;
+    return `${origin}${pathname}#live-room-${streamId}`;
+  }
+
+  function handleCopyStreamUrl(streamId: string) {
+    const url = getStreamStandaloneUrl(streamId);
+    if (navigator.clipboard) {
+      navigator.clipboard
+        .writeText(url)
+        .then(() => {
+          showToast('已複製獨立觀看網址！您可以直接分享給同學觀看。', 'success');
+        })
+        .catch(() => {
+          showToast(url, 'info');
+        });
+    } else {
+      showToast(url, 'info');
+    }
+  }
+
+  async function startBroadcastingCamera() {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: true,
+      });
+      setBroadcasterMediaStream(mediaStream);
+      setIsScreenSharing(false);
+      setIsVideoOff(false);
+      setIsMicMuted(false);
+      if (broadcasterVideoRef.current) {
+        broadcasterVideoRef.current.srcObject = mediaStream;
+        broadcasterVideoRef.current.play().catch(() => {});
+      }
+      showToast('攝影機與麥克風已啟動！', 'success');
+    } catch (err: any) {
+      console.warn('Camera access:', err);
+      showToast('無法啟用攝影機（請檢查瀏覽器授權或使用白板模式）：' + (err.message || ''), 'error');
+    }
+  }
+
+  async function startBroadcastingScreenShare() {
+    try {
+      const mediaStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+      setBroadcasterMediaStream(mediaStream);
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+      if (broadcasterVideoRef.current) {
+        broadcasterVideoRef.current.srcObject = mediaStream;
+        broadcasterVideoRef.current.play().catch(() => {});
+      }
+      mediaStream.getVideoTracks()[0].onended = () => {
+        stopBroadcastingMedia();
+      };
+      showToast('已切換為螢幕桌面分享！', 'success');
+    } catch (err: any) {
+      console.warn('Screen share:', err);
+      showToast('取消或無法啟動螢幕分享：' + (err.message || ''), 'info');
+    }
+  }
+
+  function toggleMic() {
+    if (broadcasterMediaStream) {
+      const audioTracks = broadcasterMediaStream.getAudioTracks();
+      const nextState = !isMicMuted;
+      audioTracks.forEach((track) => (track.enabled = !nextState));
+      setIsMicMuted(nextState);
+      showToast(nextState ? '麥克風已靜音' : '麥克風已開啟', 'info');
+    }
+  }
+
+  function toggleVideo() {
+    if (broadcasterMediaStream) {
+      const videoTracks = broadcasterMediaStream.getVideoTracks();
+      const nextState = !isVideoOff;
+      videoTracks.forEach((track) => (track.enabled = !nextState));
+      setIsVideoOff(nextState);
+      showToast(nextState ? '鏡頭已關閉' : '鏡頭已開啟', 'info');
+    }
+  }
+
+  function stopBroadcastingMedia() {
+    if (broadcasterMediaStream) {
+      broadcasterMediaStream.getTracks().forEach((track) => track.stop());
+      setBroadcasterMediaStream(null);
+    }
+    setIsScreenSharing(false);
+  }
+
+  async function loadStreamMessages(streamId: string) {
+    try {
+      const msgs = await api.getStreamMessages(streamId);
+      setStreamMessages(msgs);
+    } catch (err) {
+      console.error('Failed to load stream messages:', err);
+    }
+  }
+
+  async function handleSendStreamMessage() {
+    if (!activeStream) return;
+    if (!streamChatInput.trim()) return;
+
+    const role: 'student' | 'admin' | 'tutor' = isAdmin
+      ? 'admin'
+      : isTutor
+      ? 'tutor'
+      : 'student';
+
+    try {
+      const res = await api.sendStreamMessage(activeStream.id, {
+        username: activeUserName,
+        nickname: currentUser?.nickname || activeUserName,
+        role,
+        content: streamChatInput.trim(),
+        isQuestion: streamIsQuestion,
+      });
+      setStreamChatInput('');
+      setStreamMessages((prev) => [...prev, res.message]);
+      setTimeout(() => {
+        if (streamChatBoxRef.current) {
+          streamChatBoxRef.current.scrollTop = streamChatBoxRef.current.scrollHeight;
+        }
+      }, 100);
+    } catch (err: any) {
+      showToast('發送留言失敗：' + err.message, 'error');
+    }
+  }
+
+  async function handleDeleteStreamMessage(streamId: string, msgId: string) {
+    try {
+      await api.deleteStreamMessage(streamId, msgId);
+      setStreamMessages((prev) => prev.filter((m) => m.id !== msgId));
+      showToast('已刪除該則留言', 'info');
+    } catch (err: any) {
+      showToast('刪除失敗：' + err.message, 'error');
+    }
+  }
+
+  async function handleLikeStream(streamId: string) {
+    try {
+      const res = await api.likeStream(streamId);
+      setStreams((prev) =>
+        prev.map((s) => (s.id === streamId ? { ...s, likes: res.likes } : s))
+      );
+      if (activeStream && activeStream.id === streamId) {
+        setActiveStream((prev) => (prev ? { ...prev, likes: res.likes } : null));
+      }
+      const emojis = ['❤️', '🔥', '👏', '🌟', '💯', '✨'];
+      const newHeart = {
+        id: Date.now() + Math.random(),
+        emoji: emojis[Math.floor(Math.random() * emojis.length)],
+        x: 30 + Math.random() * 40,
+      };
+      setFloatingHearts((prev) => [...prev, newHeart]);
+      setTimeout(() => {
+        setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+      }, 1800);
+    } catch (err: any) {
+      console.error('Like error:', err);
+    }
+  }
+
+  async function handleCreateStream() {
+    if (!newStreamTitle.trim()) {
+      return showToast('請填寫直播課堂標題', 'error');
+    }
+    if (newStreamType === 'youtube' && !newStreamYoutubeUrl.trim()) {
+      return showToast('請填寫 YouTube 影片連結或直播代碼', 'error');
+    }
+
+    const role: 'student' | 'admin' | 'tutor' = isAdmin ? 'admin' : 'tutor';
+    const tutorSubj = isTutor ? userTutorSubjects[0] || '學科' : '';
+
+    try {
+      const res = await api.createStream({
+        title: newStreamTitle.trim(),
+        subject: newStreamSubject || '不分科',
+        streamType: newStreamType,
+        youtubeUrl: newStreamYoutubeUrl.trim(),
+        streamUrl: newStreamCustomUrl.trim(),
+        broadcaster: activeUserName,
+        broadcasterNickname: currentUser?.nickname || activeUserName,
+        broadcasterRole: role,
+        tutorSubject: tutorSubj,
+        allowChat: newStreamAllowChat,
+        whiteboardEnabled: newStreamWhiteboard,
+      });
+
+      setCreateStreamModalOpen(false);
+      setNewStreamTitle('');
+      setNewStreamYoutubeUrl('');
+      setNewStreamCustomUrl('');
+      showToast('🎉 直播課堂已成功開播！', 'success');
+      await loadStreams();
+      setActiveStream(res.stream);
+      window.location.hash = `#live-room-${res.stream.id}`;
+      if (res.stream.streamType === 'builtin') {
+        startBroadcastingCamera();
+      }
+    } catch (err: any) {
+      showToast('開啟直播失敗：' + err.message, 'error');
+    }
+  }
+
+  async function handleEndStream(streamId: string) {
+    requestConfirm({
+      title: '結束直播',
+      message: '確定要結束目前的直播課堂嗎？結束後學員將看到課堂回放狀態。',
+      onConfirm: async () => {
+        try {
+          const res = await api.endStream(streamId);
+          stopBroadcastingMedia();
+          showToast('直播已順利結束！感謝開播。', 'info');
+          await loadStreams();
+          if (activeStream?.id === streamId) {
+            setActiveStream(res.stream);
+          }
+        } catch (err: any) {
+          showToast('結束直播失敗：' + err.message, 'error');
+        }
+      },
+    });
+  }
+
+  async function handleDeleteStream(streamId: string) {
+    requestConfirm({
+      title: '刪除直播記錄',
+      message: '確定要刪除此直播紀錄嗎？所有留言與統計將一併移除。',
+      onConfirm: async () => {
+        try {
+          await api.deleteStream(streamId);
+          if (activeStream?.id === streamId) {
+            stopBroadcastingMedia();
+            setActiveStream(null);
+            window.location.hash = '';
+          }
+          await loadStreams();
+          showToast('直播記錄已刪除', 'success');
+        } catch (err: any) {
+          showToast('刪除失敗：' + err.message, 'error');
+        }
+      },
+    });
+  }
+
+  function initWhiteboardCanvas() {
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width && rect.height) {
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+  }
+
+  function handleCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.strokeStyle = whiteboardColor;
+    ctx.lineWidth = whiteboardBrushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    isDrawingRef.current = true;
+  }
+
+  function handleCanvasMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!isDrawingRef.current) return;
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+
+  function handleCanvasMouseUp() {
+    isDrawingRef.current = false;
+  }
+
+  function clearWhiteboard() {
+    const canvas = whiteboardCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   // --- Tab: Home logic ---
@@ -1873,9 +2271,10 @@ export default function App() {
                 {/* 右側：各功能頁面切換選單 + 登入者狀態 + 登出 */}
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
                   <nav className="flex items-center space-x-2 sm:space-x-4 overflow-x-auto py-1 max-w-full">
-                    {(['home', 'grades', 'settings', 'faq', 'help', 'version'] as const).map((t) => {
+                    {(['home', 'live', 'grades', 'settings', 'faq', 'help', 'version'] as const).map((t) => {
                       const titles = {
                         home: '首頁',
+                        live: '直播教室',
                         grades: '成績登記',
                         settings: '設定',
                         faq: '問題發問',
@@ -1883,18 +2282,22 @@ export default function App() {
                         version: '版本介紹',
                       };
                       const active = activeTab === t;
+                      const hasActiveStream = streams.some((s) => s.isLive);
                       return (
                         <button
                           key={t}
                           type="button"
                           onClick={() => switchTab(t)}
-                          className={`text-xs transition whitespace-nowrap cursor-pointer px-1 py-0.5 ${
+                          className={`text-xs transition whitespace-nowrap cursor-pointer px-1 py-0.5 inline-flex items-center gap-1 ${
                             active
                               ? 'text-gray-900 dark:text-white font-medium border-b-2 border-black dark:border-white'
                               : 'text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-gray-300'
                           }`}
                         >
-                          {titles[t]}
+                          {t === 'live' && hasActiveStream && (
+                            <span className="w-2 h-2 rounded-full bg-red-600 animate-ping shrink-0"></span>
+                          )}
+                          <span>{titles[t]}</span>
                         </button>
                       );
                     })}
@@ -1978,6 +2381,50 @@ export default function App() {
                             ))}
                           </div>
                         </div>
+                      </div>
+                    )}
+
+                    {/* 即時直播進行中橫幅 (LIVE Banner) */}
+                    {streams.some((s) => s.isLive) && (
+                      <div className="bg-gradient-to-r from-red-500/10 via-rose-500/15 to-purple-500/10 border border-red-300 dark:border-red-900/60 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm backdrop-blur-md">
+                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                          <div className="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-md">
+                            LIVE
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white">
+                                🔴 直播進行中
+                              </span>
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                                {streams.find((s) => s.isLive)?.subject}
+                              </span>
+                              <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                主講：{streams.find((s) => s.isLive)?.broadcasterNickname}
+                              </span>
+                            </div>
+                            <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white mt-1 truncate">
+                              {streams.find((s) => s.isLive)?.title}
+                            </h3>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const live = streams.find((s) => s.isLive);
+                            if (live) {
+                              setActiveStream(live);
+                              switchTab('live');
+                              window.location.hash = `#live-room-${live.id}`;
+                            }
+                          }}
+                          className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer shrink-0 active:scale-95"
+                        >
+                          <span>進入直播間觀看</span>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                          </svg>
+                        </button>
                       </div>
                     )}
 
@@ -2342,6 +2789,611 @@ export default function App() {
                   </div>
                 )}
 
+                {/* 1.5. 直播教室 (Live Classroom) */}
+                {activeTab === 'live' && (
+                  <div id="tab-live" className="space-y-4 sm:space-y-6 max-w-6xl mx-auto w-full min-w-0">
+                    {/* Floating Reaction Hearts Layer */}
+                    {floatingHearts.map((h) => (
+                      <div
+                        key={h.id}
+                        style={{ left: `${h.x}%` }}
+                        className="fixed bottom-24 z-60 text-3xl pointer-events-none animate-bounce"
+                      >
+                        {h.emoji}
+                      </div>
+                    ))}
+
+                    {!activeStream ? (
+                      /* ==================== A. 直播課堂大廳 (Lobby) ==================== */
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 pb-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-red-600 animate-ping"></span>
+                              <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">
+                                即時線上直播教室
+                              </h2>
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              管理員與各科小老師可隨時開播，支援獨立觀看網址、相機/螢幕分享、講課白板與即時問答。
+                            </p>
+                          </div>
+
+                          {(isAdmin || isTutor) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewStreamSubject(isTutor && userTutorSubjects[0] ? userTutorSubjects[0] : '不分科');
+                                setCreateStreamModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md transition cursor-pointer active:scale-95 shrink-0"
+                            >
+                              <span className="text-sm">📹</span>
+                              <span>開啟新直播課堂</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* 科目篩選器 */}
+                        <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                          <span className="text-xs text-gray-400 shrink-0 mr-1">篩選科目:</span>
+                          {['全部', ...SUBJECT_LIST].map((subj) => (
+                            <button
+                              key={subj}
+                              type="button"
+                              onClick={() => setStreamFilterSubject(subj)}
+                              className={`px-3 py-1 rounded-full text-xs transition cursor-pointer whitespace-nowrap ${
+                                streamFilterSubject === subj
+                                  ? 'bg-red-600 text-white font-medium shadow-xs'
+                                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                              }`}
+                            >
+                              {subj}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* 直播列表網格 */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {streams
+                            .filter((s) => streamFilterSubject === '全部' || s.subject === streamFilterSubject)
+                            .map((s) => {
+                              const timeStr = new Date(s.startedAt).toLocaleString('zh-TW', {
+                                month: 'numeric',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              });
+                              return (
+                                <div
+                                  key={s.id}
+                                  className="bg-white dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
+                                >
+                                  <div>
+                                    {/* 頂部縮圖與狀態 */}
+                                    <div className="aspect-video bg-gradient-to-br from-gray-900 to-black relative flex items-center justify-center p-4 overflow-hidden">
+                                      {s.isLive ? (
+                                        <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-red-600 text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-md">
+                                          <span className="w-2 h-2 rounded-full bg-white animate-ping"></span>
+                                          <span>LIVE 直播中</span>
+                                        </div>
+                                      ) : (
+                                        <div className="absolute top-3 left-3 z-10 bg-gray-700/80 text-gray-300 text-[11px] font-medium px-2.5 py-0.5 rounded-full">
+                                          課堂已結束
+                                        </div>
+                                      )}
+
+                                      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-black/60 backdrop-blur text-white text-[10px] px-2 py-0.5 rounded-full">
+                                        <span>{s.streamType === 'youtube' ? '📺 YouTube' : '🎥 內建課堂'}</span>
+                                      </div>
+
+                                      {/* 中央視覺象徵 */}
+                                      <div className="text-center text-white/90">
+                                        <span className="text-4xl block mb-1">
+                                          {s.streamType === 'youtube' ? '▶️' : '🎓'}
+                                        </span>
+                                        <span className="text-xs font-mono tracking-wider opacity-80">
+                                          {s.subject}專題
+                                        </span>
+                                      </div>
+
+                                      {/* 底部觀看數與讚數 */}
+                                      <div className="absolute bottom-2 left-3 right-3 flex justify-between items-center text-[11px] text-white/80">
+                                        <span>👥 {s.viewers || 1} 人在線</span>
+                                        <span>❤️ {s.likes || 0} 個讚</span>
+                                      </div>
+                                    </div>
+
+                                    {/* 資訊本體 */}
+                                    <div className="p-4 space-y-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                                          {s.subject}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400">{timeStr} 開播</span>
+                                      </div>
+
+                                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-2">
+                                        {s.title}
+                                      </h3>
+
+                                      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1">
+                                        <span className="flex items-center gap-1">
+                                          <span>主講:</span>
+                                          <span className="font-medium text-gray-700 dark:text-gray-200">
+                                            {s.broadcasterNickname}
+                                          </span>
+                                        </span>
+                                        <span className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
+                                          {s.broadcasterRole === 'admin' ? '👑 管理員' : '🎓 小老師'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* 卡片底端按鈕群 */}
+                                  <div className="p-4 pt-0 border-t border-gray-100 dark:border-gray-700/60 mt-3 flex items-center justify-between gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveStream(s);
+                                        window.location.hash = `#live-room-${s.id}`;
+                                        if (s.streamType === 'builtin' && (activeUserName === s.broadcaster || isAdmin)) {
+                                          startBroadcastingCamera();
+                                        }
+                                      }}
+                                      className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 px-3 rounded-xl transition text-center shadow-xs cursor-pointer active:scale-95"
+                                    >
+                                      進入直播間
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyStreamUrl(s.id)}
+                                      className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 transition cursor-pointer text-xs shrink-0"
+                                      title="複製獨立觀看網址"
+                                    >
+                                      🔗 複製網址
+                                    </button>
+
+                                    {(isAdmin || activeUserName === s.broadcaster) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteStream(s.id)}
+                                        className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/15 border border-red-200/70 dark:border-red-900/50 p-2 rounded-xl transition shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer shrink-0"
+                                        title="刪除此直播"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+
+                        {streams.filter((s) => streamFilterSubject === '全部' || s.subject === streamFilterSubject).length === 0 && (
+                          <div className="bg-gray-50 dark:bg-gray-800/40 border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl p-12 text-center">
+                            <span className="text-4xl block mb-2">📡</span>
+                            <h3 className="text-base font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              目前尚無【{streamFilterSubject}】的直播課堂
+                            </h3>
+                            <p className="text-xs text-gray-400 max-w-sm mx-auto mb-4">
+                              管理員或各科小老師可點擊上方「開啟新直播課堂」開始教學廣播！
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* ==================== B. 直播房間視圖 (Inside Live Room) ==================== */
+                      <div className="space-y-4">
+                        {/* 頂部導航與房間資訊列 */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                stopBroadcastingMedia();
+                                setActiveStream(null);
+                                window.location.hash = '';
+                              }}
+                              className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer shrink-0"
+                            >
+                              <span>←</span>
+                              <span>返回列表</span>
+                            </button>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-600 text-white animate-pulse">
+                                  {activeStream.isLive ? '🔴 LIVE' : '⚪ 已結束'}
+                                </span>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                                  {activeStream.subject}
+                                </span>
+                                <span className="text-xs text-gray-400">
+                                  主講：{activeStream.broadcasterNickname} ({activeStream.broadcasterRole === 'admin' ? '管理員' : '小老師'})
+                                </span>
+                              </div>
+                              <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white truncate mt-1">
+                                {activeStream.title}
+                              </h2>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyStreamUrl(activeStream.id)}
+                              className="inline-flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/70 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs px-3 py-1.5 rounded-xl transition cursor-pointer"
+                              title="複製本課堂的獨立觀看網址"
+                            >
+                              <span>📋</span>
+                              <span>複製獨立網址</span>
+                            </button>
+
+                            {(activeUserName === activeStream.broadcaster || isAdmin) && activeStream.isLive && (
+                              <button
+                                type="button"
+                                onClick={() => handleEndStream(activeStream.id)}
+                                className="bg-red-50 dark:bg-red-950/70 hover:bg-red-100 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-900 text-xs font-semibold px-3 py-1.5 rounded-xl transition cursor-pointer active:scale-95"
+                              >
+                                ⏹️ 結束直播
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 直播影音區與互動區 (雙欄響應式設計，防跑版) */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                          {/* 左側：影音播放器與白板 / 串流畫面 (2欄) */}
+                          <div className="lg:col-span-2 space-y-4">
+                            <div className="relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl border border-gray-800 flex items-center justify-center">
+                              {/* 1. YouTube 直播播放器 */}
+                              {activeStream.streamType === 'youtube' && (
+                                <iframe
+                                  title={activeStream.title}
+                                  src={`https://www.youtube.com/embed/${extractYouTubeId(activeStream.youtubeUrl || '')}?autoplay=1&rel=0`}
+                                  className="w-full h-full border-0"
+                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                  allowFullScreen
+                                />
+                              )}
+
+                              {/* 2. 內建直播播放器 (相機 / 螢幕分享 / 白板) */}
+                              {activeStream.streamType === 'builtin' && (
+                                <>
+                                  {/* 主播本體畫面 */}
+                                  {(activeUserName === activeStream.broadcaster || isAdmin) ? (
+                                    <div className="relative w-full h-full flex items-center justify-center bg-gray-950">
+                                      <video
+                                        ref={broadcasterVideoRef}
+                                        autoPlay
+                                        playsInline
+                                        muted
+                                        className="w-full h-full object-cover"
+                                      />
+
+                                      {!broadcasterMediaStream && (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-gradient-to-br from-gray-900 to-black text-white z-10">
+                                          <div className="w-16 h-16 rounded-2xl bg-red-600/20 text-red-400 flex items-center justify-center text-3xl mb-3 border border-red-500/30">
+                                            🎥
+                                          </div>
+                                          <h4 className="text-base font-semibold mb-1">
+                                            您是本場直播主講人
+                                          </h4>
+                                          <p className="text-xs text-gray-400 max-w-sm mb-4">
+                                            請在下方工具列點選「開啟攝影機」或「螢幕分享」，亦可開啟講課白板進行板書教學！
+                                          </p>
+                                          <div className="flex gap-2.5">
+                                            <button
+                                              type="button"
+                                              onClick={startBroadcastingCamera}
+                                              className="bg-red-600 hover:bg-red-700 text-white text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                                            >
+                                              📹 啟動鏡頭
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={startBroadcastingScreenShare}
+                                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                                            >
+                                              🖥️ 螢幕分享
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* 電子講課白板畫布 (可手寫或標註) */}
+                                      {whiteboardActive && (
+                                        <canvas
+                                          ref={whiteboardCanvasRef}
+                                          onMouseDown={handleCanvasMouseDown}
+                                          onMouseMove={handleCanvasMouseMove}
+                                          onMouseUp={handleCanvasMouseUp}
+                                          onMouseLeave={handleCanvasMouseUp}
+                                          className="absolute inset-0 w-full h-full cursor-crosshair z-20 pointer-events-auto bg-black/30 backdrop-blur-2xs"
+                                        />
+                                      )}
+
+                                      {/* 主播控制列 (覆蓋於視訊底部) */}
+                                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-2.5 bg-black/85 backdrop-blur-md px-3 sm:px-4 py-2 rounded-2xl border border-white/20 shadow-xl max-w-[95%] overflow-x-auto">
+                                        <button
+                                          type="button"
+                                          onClick={toggleMic}
+                                          className={`p-2 rounded-xl text-xs font-medium transition cursor-pointer shrink-0 ${
+                                            isMicMuted ? 'bg-red-600 text-white' : 'bg-white/10 hover:bg-white/20 text-white'
+                                          }`}
+                                          title={isMicMuted ? '取消靜音' : '靜音'}
+                                        >
+                                          {isMicMuted ? '🔇 靜音中' : '🎙️ 麥克風'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={toggleVideo}
+                                          className={`p-2 rounded-xl text-xs font-medium transition cursor-pointer shrink-0 ${
+                                            isVideoOff ? 'bg-red-600 text-white' : 'bg-white/10 hover:bg-white/20 text-white'
+                                          }`}
+                                          title={isVideoOff ? '開啟視訊' : '關閉視訊'}
+                                        >
+                                          {isVideoOff ? '🚫 鏡頭關閉' : '📹 鏡頭'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={isScreenSharing ? stopBroadcastingMedia : startBroadcastingScreenShare}
+                                          className={`p-2 rounded-xl text-xs font-medium transition cursor-pointer shrink-0 ${
+                                            isScreenSharing ? 'bg-blue-600 text-white' : 'bg-white/10 hover:bg-white/20 text-white'
+                                          }`}
+                                        >
+                                          🖥️ {isScreenSharing ? '停止螢幕' : '分享螢幕'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setWhiteboardActive(!whiteboardActive);
+                                            setTimeout(initWhiteboardCanvas, 100);
+                                          }}
+                                          className={`p-2 rounded-xl text-xs font-medium transition cursor-pointer shrink-0 ${
+                                            whiteboardActive ? 'bg-amber-600 text-white' : 'bg-white/10 hover:bg-white/20 text-white'
+                                          }`}
+                                        >
+                                          🎨 {whiteboardActive ? '關閉白板' : '電子白板'}
+                                        </button>
+
+                                        {whiteboardActive && (
+                                          <div className="flex items-center gap-1.5 pl-2 border-l border-white/20">
+                                            {['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#ffffff'].map((c) => (
+                                              <button
+                                                key={c}
+                                                type="button"
+                                                onClick={() => setWhiteboardColor(c)}
+                                                style={{ backgroundColor: c }}
+                                                className={`w-5 h-5 rounded-full transition cursor-pointer ${
+                                                  whiteboardColor === c ? 'ring-2 ring-white scale-110' : ''
+                                                }`}
+                                              />
+                                            ))}
+                                            <button
+                                              type="button"
+                                              onClick={clearWhiteboard}
+                                              className="text-[10px] bg-white/20 hover:bg-white/30 text-white px-2 py-1 rounded-lg transition cursor-pointer shrink-0"
+                                            >
+                                              🧹 清除
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    /* 學員觀眾觀看畫面 */
+                                    <div className="w-full h-full flex flex-col items-center justify-center text-center p-6 bg-gradient-to-br from-gray-900 via-indigo-950 to-black text-white relative">
+                                      {activeStream.streamUrl ? (
+                                        <video
+                                          src={activeStream.streamUrl}
+                                          controls
+                                          autoPlay
+                                          playsInline
+                                          className="w-full h-full object-contain"
+                                        />
+                                      ) : (
+                                        <div className="space-y-4 max-w-md">
+                                          <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center text-4xl shadow-inner">
+                                            🎓
+                                          </div>
+                                          <div>
+                                            <div className="inline-flex items-center gap-2 bg-red-600/20 border border-red-500/30 text-red-400 text-xs px-3 py-1 rounded-full mb-2">
+                                              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                                              <span>{activeStream.isLive ? '🔴 ON AIR 即時連線中' : '課堂已順利結束'}</span>
+                                            </div>
+                                            <h3 className="text-xl font-bold text-white mb-1">
+                                              {activeStream.title}
+                                            </h3>
+                                            <p className="text-xs text-indigo-200/80">
+                                              主講老師：{activeStream.broadcasterNickname} ({activeStream.subject})
+                                            </p>
+                                          </div>
+                                          <div className="flex justify-center items-center gap-1.5 h-6">
+                                            <span className="w-1.5 h-4 bg-indigo-500 rounded-full animate-pulse"></span>
+                                            <span className="w-1.5 h-6 bg-blue-400 rounded-full animate-bounce"></span>
+                                            <span className="w-1.5 h-3 bg-indigo-300 rounded-full animate-pulse"></span>
+                                            <span className="w-1.5 h-5 bg-purple-400 rounded-full animate-bounce"></span>
+                                            <span className="w-1.5 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+                                          </div>
+                                          <p className="text-[11px] text-gray-400">
+                                            音訊與白板講解同步中，您可在右側提問發問，主講老師將即時解答！
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            {/* 獨立網址專屬分享列 */}
+                            <div className="bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+                              <div className="flex items-center gap-3 w-full sm:w-auto min-w-0">
+                                <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-base shrink-0">
+                                  🔗
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                    本直播課堂專屬獨立網址
+                                  </div>
+                                  <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate select-all">
+                                    {getStreamStandaloneUrl(activeStream.id)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyStreamUrl(activeStream.id)}
+                                  className="flex-1 sm:flex-initial bg-black dark:bg-white text-white dark:text-black text-xs font-medium px-4 py-2 rounded-xl hover:bg-gray-800 dark:hover:bg-gray-200 transition cursor-pointer shadow-xs active:scale-95"
+                                >
+                                  📋 複製獨立網址
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleLikeStream(activeStream.id)}
+                                  className="inline-flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-900 text-xs font-semibold px-4 py-2 rounded-xl transition cursor-pointer active:scale-95 shadow-xs"
+                                >
+                                  <span>❤️</span>
+                                  <span>{activeStream.likes || 0} 個讚</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 右側：即時聊天室與課堂問答 (1欄) */}
+                          <div className="bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-2xl p-3.5 sm:p-4 flex flex-col h-[460px] sm:h-[540px] shadow-sm overflow-hidden">
+                            <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2.5 mb-2.5 shrink-0">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+                                <h3 className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                                  即時課堂討論與發問 ({streamMessages.length})
+                                </h3>
+                              </div>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                {activeStream.viewers || 1} 人在線
+                              </span>
+                            </div>
+
+                            {/* 訊息滾動區 */}
+                            <div
+                              ref={streamChatBoxRef}
+                              className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar space-y-2.5 pr-1.5 mb-2.5 flex flex-col min-w-0"
+                            >
+                              {streamMessages.map((m) => {
+                                const isSelf = m.username === activeUserName;
+                                const isQuestion = !!m.isQuestion;
+                                const timeStr = new Date(m.createdAt).toLocaleTimeString('zh-TW', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                });
+                                return (
+                                  <div
+                                    key={m.id}
+                                    className={`p-2.5 rounded-xl text-xs transition border ${
+                                      isQuestion
+                                        ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
+                                        : isSelf
+                                        ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900'
+                                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1 mb-1 text-[10px]">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="font-bold text-gray-800 dark:text-gray-200">
+                                          {m.nickname || m.username}
+                                        </span>
+                                        <span
+                                          className={`px-1.5 py-0.2 rounded text-[9px] font-semibold ${
+                                            m.role === 'admin'
+                                              ? 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300'
+                                              : m.role === 'tutor'
+                                              ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+                                              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                          }`}
+                                        >
+                                          {m.role === 'admin' ? '👑 管理員' : m.role === 'tutor' ? '🎓 小老師' : '🎒 學員'}
+                                        </span>
+                                        {isQuestion && (
+                                          <span className="bg-amber-500 text-white font-bold text-[9px] px-1.5 rounded-full animate-pulse">
+                                            ❓ 提問
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1 text-gray-400">
+                                        <span>{timeStr}</span>
+                                        {(isAdmin || activeUserName === activeStream.broadcaster) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteStreamMessage(activeStream.id, m.id)}
+                                            className="inline-flex items-center p-1 text-red-500 hover:text-red-700 rounded transition cursor-pointer"
+                                            title="刪除此留言"
+                                          >
+                                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words">
+                                      {m.content}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                              {streamMessages.length === 0 && (
+                                <p className="text-xs text-gray-400 text-center my-auto">
+                                  歡迎加入直播課堂！有任何問題或想法，隨時在此留言或點擊提問。
+                                </p>
+                              )}
+                            </div>
+
+                            {/* 輸入留言與發問列 */}
+                            <div className="space-y-2 shrink-0">
+                              <div className="flex items-center justify-between">
+                                <label className="inline-flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-semibold cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={streamIsQuestion}
+                                    onChange={(e) => setStreamIsQuestion(e.target.checked)}
+                                    className="rounded text-amber-600"
+                                  />
+                                  <span>❓ 標註為課堂提問 (醒目標籤)</span>
+                                </label>
+                              </div>
+
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={streamChatInput}
+                                  onChange={(e) => setStreamChatInput(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleSendStreamMessage()}
+                                  className="flex-1 px-3 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs focus:outline-none focus:border-red-500 dark:focus:border-red-400 text-gray-900 dark:text-gray-100"
+                                  placeholder={streamIsQuestion ? "請輸入您想向老師提問的問題..." : "輸入留言參與即時互動討論..."}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleSendStreamMessage}
+                                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition cursor-pointer shrink-0 shadow-xs active:scale-95"
+                                >
+                                  發送
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 2. 成績登記 (Grades) */}
                 {activeTab === 'grades' && (
                   <div id="tab-grades" className="space-y-6 max-w-2xl mx-auto">
@@ -2435,9 +3487,13 @@ export default function App() {
                                       <button
                                         type="button"
                                         onClick={() => handleDeleteGrade(g.id)}
-                                        className="text-xs text-red-500 hover:underline cursor-pointer"
+                                        className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/15 border border-red-200/70 dark:border-red-900/50 px-2.5 py-0.5 rounded-md transition shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer"
+                                        title="刪除成績紀錄"
                                       >
-                                        刪除
+                                        <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                        <span>刪除</span>
                                       </button>
                                     </td>
                                   )}
@@ -2839,10 +3895,13 @@ export default function App() {
                                           <button
                                             type="button"
                                             onClick={() => handleDeleteUser(u.username)}
-                                            className="bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-950 dark:text-rose-300 text-[11px] px-2 py-1 rounded transition cursor-pointer"
+                                            className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/15 border border-red-200/70 dark:border-red-900/50 px-2 py-1 rounded-md transition shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer"
                                             title="刪除學員帳號"
                                           >
-                                            🗑️
+                                            <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            <span>刪除</span>
                                           </button>
                                         )}
                                       </td>
@@ -3233,10 +4292,12 @@ export default function App() {
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteFaqMessage(m.id)}
-                                      className="text-red-400 hover:text-red-600 p-0.5 text-[9px] cursor-pointer"
+                                      className="inline-flex items-center gap-0.5 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50 p-1 rounded transition cursor-pointer"
                                       title="刪除此訊息"
                                     >
-                                      🗑️
+                                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
                                     </button>
                                   </div>
                                   <div
@@ -3392,9 +4453,12 @@ export default function App() {
                                 <button
                                   type="button"
                                   onClick={() => handleClearUserFaq(selectedAdminChatUser)}
-                                  className="text-[10px] text-red-500 hover:underline cursor-pointer ml-auto"
+                                  className="inline-flex items-center gap-1 text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/15 border border-red-200/70 dark:border-red-900/50 px-2 py-0.5 rounded-md transition shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer ml-auto"
                                 >
-                                  清空此學員紀錄
+                                  <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                  <span>清空對話</span>
                                 </button>
                               )}
                             </div>
@@ -3429,10 +4493,12 @@ export default function App() {
                                           <button
                                             type="button"
                                             onClick={() => handleDeleteFaqMessage(m.id)}
-                                            className="text-red-400 hover:text-red-600 p-0.5 text-[9px] cursor-pointer"
-                                            title="刪除"
+                                            className="inline-flex items-center gap-0.5 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50 p-1 rounded transition cursor-pointer"
+                                            title="刪除此訊息"
                                           >
-                                            🗑️
+                                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
                                           </button>
                                         </div>
                                         <div
@@ -3725,6 +4791,162 @@ export default function App() {
                   </span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== 8. CREATE LIVE STREAM MODAL ==================== */}
+      {createStreamModalOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-md border border-gray-200 dark:border-gray-700 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📹</span>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  開啟新線上直播課堂
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateStreamModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              管理員與小老師可自由選擇 YouTube 直播或內建直播（具備獨立房間網址、視訊螢幕分享與電子講課白板）。
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  直播課堂標題 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newStreamTitle}
+                  onChange={(e) => setNewStreamTitle(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs focus:outline-none focus:border-red-500 text-gray-900 dark:text-gray-100"
+                  placeholder="例如：【會考衝刺】國中會考數學核心重點複習"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    指定學科
+                  </label>
+                  <select
+                    value={newStreamSubject}
+                    onChange={(e) => setNewStreamSubject(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs"
+                  >
+                    {SUBJECT_LIST.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    直播方式
+                  </label>
+                  <select
+                    value={newStreamType}
+                    onChange={(e) => setNewStreamType(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs"
+                  >
+                    <option value="builtin">🎥 內建直播 (推薦)</option>
+                    <option value="youtube">📺 YouTube 直播</option>
+                  </select>
+                </div>
+              </div>
+
+              {newStreamType === 'youtube' ? (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    YouTube 影片連結或直播代碼 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newStreamYoutubeUrl}
+                    onChange={(e) => setNewStreamYoutubeUrl(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-xs focus:outline-none focus:border-red-500 text-gray-900 dark:text-gray-100 font-mono"
+                    placeholder="https://www.youtube.com/watch?v=... 或 https://youtu.be/..."
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    可輸入公開或不公開的 YouTube 直播或影片連結，系統將自動解析嵌入。
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3 bg-gray-50 dark:bg-gray-900/60 p-3.5 rounded-xl border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-200">
+                    <span>🌟 內建直播課堂功能特點</span>
+                  </div>
+                  <ul className="text-[11px] text-gray-500 dark:text-gray-400 space-y-1 list-disc list-inside">
+                    <li>自動生成專屬獨立房間網址（學員點擊直達）</li>
+                    <li>支援瀏覽器相機廣播、麥克風語音與螢幕桌面分享</li>
+                    <li>內建彩色電子講課白板與即時清除功能</li>
+                  </ul>
+
+                  <div>
+                    <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">
+                      自訂外部串流網址 (選填，如 HLS .m3u8 或專屬伺服器推流網址)
+                    </label>
+                    <input
+                      type="text"
+                      value={newStreamCustomUrl}
+                      onChange={(e) => setNewStreamCustomUrl(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-mono"
+                      placeholder="https://example.com/live/stream.m3u8 (選填)"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <label className="flex items-center text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newStreamAllowChat}
+                        onChange={(e) => setNewStreamAllowChat(e.target.checked)}
+                        className="mr-1.5 rounded text-red-600"
+                      />
+                      啟用課堂即時聊天室
+                    </label>
+
+                    <label className="flex items-center text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newStreamWhiteboard}
+                        onChange={(e) => setNewStreamWhiteboard(e.target.checked)}
+                        className="mr-1.5 rounded text-red-600"
+                      />
+                      啟用講課白板
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2.5 mt-6">
+              <button
+                type="button"
+                onClick={() => setCreateStreamModalOpen(false)}
+                className="flex-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 text-xs font-medium py-2.5 rounded-xl transition cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateStream}
+                className="flex-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white text-xs font-semibold py-2.5 rounded-xl shadow-md transition cursor-pointer active:scale-95"
+              >
+                🚀 立即開啟直播
+              </button>
             </div>
           </div>
         </div>

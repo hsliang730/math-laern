@@ -2,16 +2,31 @@
   "users": [
     {
       "username": "hsliang-admin",
-      "password": "admin123",
+      "password": "William0730",
       "nickname": "系統管理員",
       "isAdmin": true,
       "isTutor": false,
       "tutorSubjects": [],
       "must_change_password": false,
       "isBanned": false,
-      "last_login": "2026-10-25T13:14:03.658Z",
-      "last_seen": "2026-10-25T13:40:12.640Z",
+      "last_login": "2026-10-26T09:14:51.079Z",
+      "last_seen": "2026-10-26T09:19:52.718Z",
       "created_at": "2026-10-25T12:00:00.000Z"
+    },
+    {
+      "username": "test",
+      "password": "William0730",
+      "nickname": "",
+      "isAdmin": false,
+      "isTutor": true,
+      "tutorSubjects": [
+        "不分科"
+      ],
+      "must_change_password": false,
+      "isBanned": false,
+      "last_login": "2026-10-26T09:14:37.699Z",
+      "last_seen": "2026-10-26T09:14:37.699Z",
+      "created_at": "2026-10-26T09:13:57.374Z"
     }
   ],
   "site_config": {
@@ -22,56 +37,18 @@
     "marquee_text": "歡迎來到網站！目前系統功能全面運作中，講義與成績系統已連線。",
     "help_text": "【系統幫助與操作指引】\n\n1. 登入與註冊：輸入使用者帳號與密碼即可登入。初次使用預設密碼時需依照安全規則變更密碼。\n2. 講義閱讀：點選講義資料夾可展開瀏覽並預覽 PDF，支援科目篩選、連續滾動與放大下載。\n3. 成績登記：填寫考試科目、範圍與分數，即可自動計入個人學習歷程。\n4. 問題發問：發問時可選擇指定科目，當科小老師與管理員皆可即時為您解答。",
     "version_intro_text": "【我的網站 - 全功能簡介與版本說明】\n\n🔹 1. 安全身分驗證與個人化\n   - 支援深色與亮色模式。\n   - 靈動幾何角色與互動眼球。\n   - 支援生物辨識登入。\n\n🔹 2. 小老師與科目分科制度\n   - 管理員可指派各學科小老師 (數學、物理、化學、英文、國文)。\n   - 小老師可上傳與發布當科講義。\n   - 發問聊天支援科目標籤，當科小老師與管理員均可直接在 LINE 模式中回覆。\n\n🔹 3. 伺服器修復模式\n   - 管理員可一鍵開啟伺服器修復維護，關閉一般功能保護資料。\n\n🔹 4. 即時在線監控\n   - 管理員可即時查看成員上線狀態 (🟢 在線 / ⚪ 離線)。",
-    "maintenance_mode": false,
+    "maintenance_mode": true,
     "maintenance_message": "⚠️ 系統目前正在進行伺服器維護與升級修復，暫時關閉所有功能，請稍候再試。",
     "countdown_enabled": true,
     "countdown_title": "116年 國中教育會考倒數",
     "countdown_target_date": "2027-05-15T08:00",
     "countdown_slogan": "全力以赴，金榜題名！每一步努力都在成就更好的自己"
   },
-  "announcements": [
-    {
-      "id": "ann-1",
-      "content": "歡迎各位學員！各學科講義與發問系統已全數上架，請至對應科目瀏覽研讀。",
-      "created_by": "hsliang-admin",
-      "created_at": "2026-10-25T12:00:00.000Z"
-    }
-  ],
-  "handouts": [
-    {
-      "id": "folder-math-1",
-      "title": "高一數學講義與試題",
-      "subject": "數學",
-      "url": "",
-      "is_folder": true,
-      "parent_id": null,
-      "created_by": "hsliang-admin",
-      "created_at": "2026-10-25T12:00:00.000Z"
-    },
-    {
-      "id": "file-math-1",
-      "title": "第一單元：數與式重點精華講義.pdf",
-      "subject": "數學",
-      "url": "/samples/math_sample.pdf",
-      "is_folder": false,
-      "parent_id": "folder-math-1",
-      "created_by": "hsliang-admin",
-      "created_at": "2026-10-25T12:05:00.000Z"
-    }
-  ],
+  "announcements": [],
+  "handouts": [],
   "forum_messages": [],
   "grades": [],
-  "faq_messages": [
-    {
-      "id": "faq-1792935359046-dncu",
-      "username": "hsliang-admin",
-      "sender": "hsliang-admin",
-      "subject": "數學",
-      "sender_role": "student",
-      "tutor_subject": "",
-      "content": "痾痾",
-      "is_admin_reply": false,
-      "created_at": "2026-10-25T13:35:59.046Z"
-    }
-  ]
+  "faq_messages": [],
+  "streams": [],
+  "stream_messages": []
 }

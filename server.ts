@@ -143,6 +143,8 @@ const initialDb = {
   forum_messages: [],
   grades: [],
   faq_messages: [],
+  streams: [],
+  stream_messages: [],
 };
 
 function readDb() {
@@ -734,6 +736,124 @@ async function startServer() {
     const { username } = req.params;
     const db = readDb();
     db.faq_messages = (db.faq_messages || []).filter((m: any) => m.username !== username);
+    writeDb(db);
+    return res.json({ success: true });
+  });
+
+  // 16. Live Streams
+  app.get('/api/streams', (req, res) => {
+    const db = readDb();
+    return res.json(db.streams || []);
+  });
+
+  app.post('/api/streams', (req, res) => {
+    const { title, subject, streamType, youtubeUrl, streamUrl, broadcaster, broadcasterNickname, broadcasterRole, tutorSubject, allowChat, whiteboardEnabled } = req.body;
+    if (!title || !broadcaster) {
+      return res.status(400).json({ error: '請提供直播標題與開播者資訊' });
+    }
+
+    const db = readDb();
+    if (!db.streams) db.streams = [];
+
+    const newStream = {
+      id: 'stream-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      title: title.trim(),
+      subject: subject || '不分科',
+      streamType: streamType === 'youtube' ? 'youtube' : 'builtin',
+      youtubeUrl: youtubeUrl || '',
+      streamUrl: streamUrl || '',
+      isLive: true,
+      broadcaster,
+      broadcasterNickname: broadcasterNickname || broadcaster,
+      broadcasterRole: broadcasterRole || 'admin',
+      tutorSubject: tutorSubject || '',
+      viewers: 1,
+      likes: 0,
+      startedAt: new Date().toISOString(),
+      allowChat: allowChat !== false,
+      whiteboardEnabled: !!whiteboardEnabled,
+    };
+
+    db.streams.unshift(newStream);
+    writeDb(db);
+    return res.json({ success: true, stream: newStream });
+  });
+
+  app.patch('/api/streams/:id/end', (req, res) => {
+    const { id } = req.params;
+    const db = readDb();
+    if (!db.streams) db.streams = [];
+    const stream = db.streams.find((s: any) => s.id === id);
+    if (!stream) {
+      return res.status(404).json({ error: '直播不存在' });
+    }
+    stream.isLive = false;
+    stream.endedAt = new Date().toISOString();
+    writeDb(db);
+    return res.json({ success: true, stream });
+  });
+
+  app.delete('/api/streams/:id', (req, res) => {
+    const { id } = req.params;
+    const db = readDb();
+    db.streams = (db.streams || []).filter((s: any) => s.id !== id);
+    if (db.stream_messages) {
+      db.stream_messages = db.stream_messages.filter((m: any) => m.streamId !== id);
+    }
+    writeDb(db);
+    return res.json({ success: true });
+  });
+
+  app.post('/api/streams/:id/like', (req, res) => {
+    const { id } = req.params;
+    const db = readDb();
+    const stream = (db.streams || []).find((s: any) => s.id === id);
+    if (stream) {
+      stream.likes = (stream.likes || 0) + 1;
+      writeDb(db);
+      return res.json({ success: true, likes: stream.likes });
+    }
+    return res.status(404).json({ error: '直播不存在' });
+  });
+
+  // Stream Messages
+  app.get('/api/streams/:id/messages', (req, res) => {
+    const { id } = req.params;
+    const db = readDb();
+    const msgs = (db.stream_messages || []).filter((m: any) => m.streamId === id);
+    return res.json(msgs);
+  });
+
+  app.post('/api/streams/:id/messages', (req, res) => {
+    const { id } = req.params;
+    const { username, nickname, role, content, isQuestion } = req.body;
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: '留言內容不能為空' });
+    }
+
+    const db = readDb();
+    if (!db.stream_messages) db.stream_messages = [];
+
+    const newMsg = {
+      id: 'smsg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      streamId: id,
+      username: username || 'guest',
+      nickname: nickname || username || '同學',
+      role: role || 'student',
+      content: content.trim(),
+      isQuestion: !!isQuestion,
+      createdAt: new Date().toISOString(),
+    };
+
+    db.stream_messages.push(newMsg);
+    writeDb(db);
+    return res.json({ success: true, message: newMsg });
+  });
+
+  app.delete('/api/streams/:id/messages/:msgId', (req, res) => {
+    const { id, msgId } = req.params;
+    const db = readDb();
+    db.stream_messages = (db.stream_messages || []).filter((m: any) => !(m.streamId === id && m.id === msgId));
     writeDb(db);
     return res.json({ success: true });
   });
